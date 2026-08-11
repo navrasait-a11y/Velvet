@@ -1,0 +1,91 @@
+{
+  "rules": {
+
+    "presence": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
+
+    "chatRooms": {
+      "$roomId": {
+        ".read": "auth != null && data.child('participants').child(auth.uid).exists()",
+        ".write": false
+      }
+    },
+
+    "messages": {
+      "$roomId": {
+        ".read": "auth != null && root.child('chatRooms').child($roomId).child('participants').child(auth.uid).exists()",
+        ".write": false
+      }
+    },
+
+    "userChats": {
+      "$userId": {
+        ".read": "auth != null && auth.uid === $userId",
+        ".write": false
+      }
+    },
+
+    "typing": {
+      "$roomId": {
+        ".read": "auth != null && root.child('chatRooms').child($roomId).child('participants').child(auth.uid).exists()",
+        "$userId": {
+          ".write": "auth != null && auth.uid === $userId && root.child('chatRooms').child($roomId).child('participants').child(auth.uid).exists()"
+        }
+      }
+    },
+
+    "groups": {
+      "$groupId": {
+        ".read": "auth != null && data.child('members').child(auth.uid).child('status').val() === 'accepted'",
+        ".write": false
+      }
+    },
+
+    "userGroups": {
+      "$userId": {
+        ".read": "auth != null && auth.uid === $userId",
+        ".write": false
+      }
+    },
+
+    "groupInvites": {
+      "$userId": {
+        ".read": "auth != null && auth.uid === $userId",
+        ".write": false
+      }
+    },
+
+    "groupMessages": {
+      "$groupId": {
+        ".read": "auth != null && root.child('groups').child($groupId).child('members').child(auth.uid).child('status').val() === 'accepted'",
+        ".write": false
+      }
+    },
+
+    "userGroupChats": {
+      "$userId": {
+        ".read": "auth != null && auth.uid === $userId",
+        ".write": false
+      }
+    },
+
+    "groupTyping": {
+      "$groupId": {
+        ".read": "auth != null && root.child('groups').child($groupId).child('members').child(auth.uid).child('status').val() === 'accepted'",
+        "$userId": {
+          ".write": "auth != null && auth.uid === $userId && root.child('groups').child($groupId).child('members').child(auth.uid).child('status').val() === 'accepted'"
+        }
+      }
+    },
+
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+
+  }
+}
