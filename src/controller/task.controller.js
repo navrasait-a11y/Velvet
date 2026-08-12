@@ -2,6 +2,17 @@ const taskService = require("../services/task.service");
 const groupService = require("../services/group.service");
 const { logger } = require("../utils/logger");
 
+const getTaskErrorStatus = (error) => {
+  const message = error?.message || "";
+  if (message === "Group not found" || message === "Task not found") return 404;
+  if (
+    message.includes("not a member") ||
+    message.includes("Only the task creator") ||
+    message.includes("Only admins")
+  ) return 403;
+  return 500;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Create Task
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,21 +28,25 @@ exports.createTask = async (req, res) => {
 
     const group = await groupService.getGroupDetails(groupId, userId);
 
-    const task = await taskService.createTask(groupId, {
-      title: title.trim(),
-      description: description?.trim() || "",
-      date: date || "",
-      time: time || "",
-      assignedTo: assignedTo?.trim() || "",
-      persons: Array.isArray(persons) ? persons : [],
-      url: url?.trim() || "",
-      attachmentName: attachmentName?.trim() || "",
-    }, userId);
+    const task = await taskService.createTask({
+      groupId,
+      taskData: {
+        title: title.trim(),
+        description: description?.trim() || "",
+        date: date || "",
+        time: time || "",
+        assignedTo: assignedTo?.trim() || "",
+        persons: Array.isArray(persons) ? persons : [],
+        url: url?.trim() || "",
+        attachmentName: attachmentName?.trim() || "",
+      },
+      createdBy: userId,
+    });
 
     return res.status(201).json({ success: true, message: "Task created", data: task });
   } catch (error) {
     logger.error("Create Task Error:", error);
-    return res.status(403).json({ success: false, message: error.message });
+    return res.status(getTaskErrorStatus(error)).json({ success: false, message: error.message });
   }
 };
 
@@ -49,7 +64,7 @@ exports.getTasks = async (req, res) => {
 
     return res.status(200).json({ success: true, count: tasks.length, data: tasks });
   } catch (error) {
-    return res.status(403).json({ success: false, message: error.message });
+    return res.status(getTaskErrorStatus(error)).json({ success: false, message: error.message });
   }
 };
 
@@ -67,6 +82,6 @@ exports.deleteTask = async (req, res) => {
 
     return res.status(200).json({ success: true, message: "Task deleted" });
   } catch (error) {
-    return res.status(403).json({ success: false, message: error.message });
+    return res.status(getTaskErrorStatus(error)).json({ success: false, message: error.message });
   }
 };

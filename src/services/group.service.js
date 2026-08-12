@@ -1,5 +1,4 @@
 const { getRealtimeDb, getDb } = require("../config/firebase");
-const { isMutualContact } = require("./contact.service");
 const {
   notifyNewGroupMessage,
   notifyGroupInvitation,
@@ -75,7 +74,6 @@ const fetchMemberProfile = async (userId, showPhone = true, profileMap = null, u
 // Create Group
 // Creator is auto-added as admin with status "accepted".
 // Invited members get status "pending" — they must accept to join.
-// Mutual contact rule applies for invitations.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.createGroup = async ({
   createdBy,
@@ -102,12 +100,6 @@ exports.createGroup = async ({
     throw new Error(`Group cannot have more than ${MAX_GROUP_MEMBERS} members`);
   }
 
-  // Validate mutual contact rule for each invitee — run in parallel for speed
-  const mutualResults = await Promise.all(
-    inviteList.map((memberId) => isMutualContact(createdBy, memberId))
-  );
-  const validInvitees = inviteList.filter((_, i) => mutualResults[i]);
-
   const memberObject = {
     [createdBy]: {
       userId: createdBy,
@@ -117,7 +109,7 @@ exports.createGroup = async ({
     },
   };
 
-  validInvitees.forEach((userId) => {
+  inviteList.forEach((userId) => {
     memberObject[userId] = {
       userId,
       role: "member",
@@ -158,21 +150,21 @@ exports.createGroup = async ({
   updates[`userGroupChats/${createdBy}/${groupId}/unreadCount`] = 0;
 
   // Add pending invites to the groupInvites index for efficient lookup
-  validInvitees.forEach((userId) => {
+  inviteList.forEach((userId) => {
     updates[`groupInvites/${userId}/${groupId}`] = true;
   });
 
   await rtdb.ref().update(updates);
 
   // FCM: notify each invitee about the group invitation — fire and forget
-  if (validInvitees.length > 0) {
+  if (inviteList.length > 0) {
     setImmediate(async () => {
       try {
         const creatorDoc = await db.collection("Users_Profile").doc(createdBy).get();
         const creatorName = creatorDoc.exists ? creatorDoc.data().name || "Someone" : "Someone";
 
         await Promise.all(
-          validInvitees.map((inviteeId) =>
+          inviteList.map((inviteeId) =>
             notifyGroupInvitation({ inviteeId, inviterName: creatorName, groupName, groupId })
           )
         );
@@ -188,8 +180,8 @@ exports.createGroup = async ({
     groupBio: groupBio || "",
     groupImage: groupImageUrl,
     backgroundImage: backgroundImageUrl,
-    invitedCount: validInvitees.length,
-    skippedCount: inviteList.length - validInvitees.length,
+    invitedCount: inviteList.length,
+    skippedCount: 0,
   };
 };
 
@@ -304,7 +296,7 @@ exports.rejectInvitation = async (userId, groupId) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Add members to group (admin only, mutual contact rule applies)
+// Add members to group (admin only)
 // ─────────────────────────────────────────────────────────────────────────────
 exports.addMembers = async (adminId, groupId, newMemberIds) => {
   const group = await fetchGroup(groupId);
@@ -346,20 +338,10 @@ exports.addMembers = async (adminId, groupId, newMemberIds) => {
     candidateIds.push(memberId);
   }
 
-  // Batch mutual contact check in parallel instead of serial loop
-  const mutualResults = await Promise.all(
-    candidateIds.map((memberId) => isMutualContact(adminId, memberId))
-  );
-
   // Process results
   for (let i = 0; i < candidateIds.length; i++) {
     if (slotsRemaining <= 0) {
       results.skipped.push({ userId: candidateIds[i], reason: "group_full" });
-      continue;
-    }
-
-    if (!mutualResults[i]) {
-      results.skipped.push({ userId: candidateIds[i], reason: "not_mutual_contact" });
       continue;
     }
 

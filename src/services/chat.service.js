@@ -1,5 +1,4 @@
 const { getDb, getRealtimeDb } = require("../config/firebase");
-const { isMutualContact } = require("./contact.service");
 const { isBlocked } = require("./block.service");
 const { notifyNewMessage } = require("./notification.service");
 const { logger } = require("../utils/logger");
@@ -11,29 +10,17 @@ const MAX_MESSAGES_PER_PAGE = 100;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Create chat room
-// Mutual contact + block check happens HERE — once at room creation.
-// Subsequent messages skip the check via `mutualVerified` cached on the room.
+// Block check happens HERE — once at room creation.
 // ─────────────────────────────────────────────────────────────────────────────
 const createRoom = async (roomId, senderId, receiverId) => {
   const roomRef = rtdb.ref(`chatRooms/${roomId}`);
 
-  // Read current state first — avoids overwriting existing room data
   const existingSnap = await roomRef.once("value");
   const roomExists = existingSnap.exists();
   const existingRoom = roomExists ? existingSnap.val() : null;
 
-  // If room already exists and mutual contact was previously verified — fast path
-  if (roomExists && existingRoom.mutualVerified) {
+  if (roomExists) {
     return existingRoom;
-  }
-
-  // Run mutual contact + block checks BEFORE writing any room data
-  // This prevents writing a room that will just be deleted if checks fail
-  const mutual = await isMutualContact(senderId, receiverId, roomId);
-  if (!mutual) {
-    throw new Error(
-      "You can only message users who have saved your contact and whom you have saved."
-    );
   }
 
   const blocked = await isBlocked(senderId, receiverId);
@@ -41,13 +28,6 @@ const createRoom = async (roomId, senderId, receiverId) => {
     throw new Error("Cannot send message. A block exists between you and this user.");
   }
 
-  if (roomExists) {
-    // Room exists but mutualVerified was false — update it now (await for reliability)
-    await roomRef.update({ mutualVerified: true });
-    return { ...existingRoom, mutualVerified: true };
-  }
-
-  // New room — create it with mutualVerified: true since checks passed
   const timestamp = Date.now();
   const roomData = {
     roomId,
@@ -57,16 +37,13 @@ const createRoom = async (roomId, senderId, receiverId) => {
     lastMessageSender: "",
     lastMessageTime: 0,
     createdAt: timestamp,
-    mutualVerified: true,
   };
 
-  // Use transaction to avoid duplicate room creation from concurrent requests
   await roomRef.transaction((currentData) => {
-    if (currentData !== null) return currentData; // Another request created it first
+    if (currentData !== null) return currentData;
     return roomData;
   });
 
-  // Re-read to get the final committed state
   const finalSnap = await roomRef.once("value");
   return finalSnap.val();
 };

@@ -1,5 +1,5 @@
 /**
- * Contact Service — Mutual Contact Rule
+ * Contact Service
  *
  * How it works:
  * ─────────────────────────────────────────────────────────────────────────────
@@ -12,24 +12,14 @@
  *   - When User B registers on Velvet and A already has B's number:
  *       Server-side: we look up phone_index to find A's userId,
  *       then write User_Contacts/A/contacts/B automatically.
- *       This is the key improvement — B doesn't need to open the app first.
- *
- * Mutual check: isMutualContact(A, B)
- *   → A/contacts/B exists  AND  B/contacts/A exists
- *   → Both must have saved each other's number
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * Room-level caching:
- *   Once a room is created between two users, we cache `mutualVerified: true`
- *   on the room. Subsequent messages skip the Firestore check entirely —
- *   4 reads per message → 0 reads per message after first.
+ *       This means A can immediately message B after B registers,
+ *       without A needing to re-open the app and re-sync contacts.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const { getDb, getRealtimeDb } = require("../config/firebase");
+const { getDb } = require("../config/firebase");
 
 const db = getDb();
-const rtdb = getRealtimeDb();
 const { logger } = require("../utils/logger");
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,80 +176,9 @@ const syncSavedPhoneIndex = async (userId, phones) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// hasContact — check if userA has userB in their saved contacts
-// ─────────────────────────────────────────────────────────────────────────────
-const hasContact = async (userA, userB) => {
-  const doc = await db
-    .collection("User_Contacts")
-    .doc(userA)
-    .collection("contacts")
-    .doc(userB)
-    .get();
-
-  return doc.exists;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// isMutualContact — both must have each other saved
-// Uses RTDB room cache to skip Firestore reads after first verification.
-// ─────────────────────────────────────────────────────────────────────────────
-const isMutualContact = async (userA, userB, roomId = null) => {
-  // Check room-level cache first (0 Firestore reads after first message)
-  if (roomId) {
-    const cachedSnap = await rtdb
-      .ref(`chatRooms/${roomId}/mutualVerified`)
-      .once("value");
-
-    if (cachedSnap.exists() && cachedSnap.val() === true) {
-      return true;
-    }
-  }
-
-  // Firestore check — run both in parallel
-  const [aHasB, bHasA] = await Promise.all([
-    hasContact(userA, userB),
-    hasContact(userB, userA),
-  ]);
-
-  const mutual = aHasB && bHasA;
-
-  // Cache result on the room so future messages skip this check
-  if (mutual && roomId) {
-    rtdb
-      .ref(`chatRooms/${roomId}/mutualVerified`)
-      .set(true)
-      .catch((err) =>
-        logger.error("[Contact] cache mutualVerified error:", err.message)
-      );
-  }
-
-  return mutual;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// removeContactEntry — called when a user blocks another
-// Removes the contact entry so they can no longer message each other
-// ─────────────────────────────────────────────────────────────────────────────
-const removeContactEntry = async (userId, targetUserId) => {
-  try {
-    await db
-      .collection("User_Contacts")
-      .doc(userId)
-      .collection("contacts")
-      .doc(targetUserId)
-      .delete();
-  } catch (err) {
-    logger.error("[Contact] removeContactEntry error:", err.message);
-  }
-};
-
 module.exports = {
   syncContacts,
   syncContactsWithReverse,
   syncSavedPhoneIndex,
   syncReverseContacts,
-  hasContact,
-  isMutualContact,
-  removeContactEntry,
 };

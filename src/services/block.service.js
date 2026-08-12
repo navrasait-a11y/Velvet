@@ -1,14 +1,10 @@
-const { getDb } = require("../config/firebase");
-const { getRealtimeDb } = require("../config/firebase");
-const { generateRoomId } = require("../utils/roomId");
+const { getDb, getRealtimeDb } = require("../config/firebase");
 
 const db = getDb();
 const rtdb = getRealtimeDb();
 
 /**
  * Block a user.
- * Also invalidates the RTDB room cache (mutualVerified) so the blocked user
- * cannot bypass the block check on their next message attempt.
  */
 const blockUser = async (blockerId, blockedUserId) => {
   // Validate target user exists
@@ -31,13 +27,6 @@ const blockUser = async (blockerId, blockedUserId) => {
     { blockedUsers: { [blockedUserId]: { blockedAt: Date.now() } } },
     { merge: true }
   );
-
-  // Invalidate the room cache in both directions so neither side bypasses checks
-  const roomId = generateRoomId(blockerId, blockedUserId);
-  rtdb
-    .ref(`chatRooms/${roomId}/mutualVerified`)
-    .set(false)
-    .catch(() => {}); // Non-fatal — block check in sendMessage is the real enforcement
 };
 
 const unblockUser = async (blockerId, blockedUserId) => {
