@@ -153,9 +153,9 @@ app.use("/api/user", userRoutes);
 app.use("/api/chat", authMiddleware, messageLimiter, chatRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/options", chatOptionRoutes);
-app.use("/api/privateChat", authMiddleware, messageLimiter, privateChatRoutes);
-app.use("/api/groupChat", authMiddleware, messageLimiter, groupChatRoutes);
-app.use("/api/groupChat", authMiddleware, messageLimiter, taskRoutes);
+app.use("/api/privateChat", privateChatRoutes);
+app.use("/api/groupChat", messageLimiter, groupChatRoutes);
+app.use("/api/groupChat", messageLimiter, taskRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/presence", presenceRoutes);
 

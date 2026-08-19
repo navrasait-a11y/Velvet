@@ -233,6 +233,10 @@ const getChatList = async (userId, favorite, archived, isPrivate) => {
 
   const chatData = snapshot.val();
 
+  const isFavoriteMode = favorite === "true";
+  const isArchivedMode = archived === "true";
+  const isPrivateMode = isPrivate === "true";
+
   // Filter chats by list type
   const filtered = [];
   for (const roomId in chatData) {
@@ -241,16 +245,19 @@ const getChatList = async (userId, favorite, archived, isPrivate) => {
     const chatIsArchived = chat.isArchived || false;
     const chatIsPrivate = chat.isPrivate || false;
 
-    if (
-      favorite !== "true" &&
-      archived !== "true" &&
-      isPrivate !== "true" &&
-      (chatIsFavorite || chatIsArchived || chatIsPrivate)
-    ) continue;
-
-    if (favorite === "true" && !chatIsFavorite) continue;
-    if (archived === "true" && !chatIsArchived) continue;
-    if (isPrivate === "true" && !chatIsPrivate) continue;
+    if (isPrivateMode) {
+      // Private list: only chats marked as private
+      if (!chatIsPrivate) continue;
+    } else if (isArchivedMode) {
+      // Archived list: only chats marked as archived (and not private)
+      if (!chatIsArchived || chatIsPrivate) continue;
+    } else if (isFavoriteMode) {
+      // Favorites list: only favorite chats that are not archived or private
+      if (!chatIsFavorite || chatIsArchived || chatIsPrivate) continue;
+    } else {
+      // Default inbox: exclude archived and private chats
+      if (chatIsArchived || chatIsPrivate) continue;
+    }
 
     filtered.push({ roomId, chat });
   }
@@ -348,21 +355,27 @@ const deleteForEveryone = async ({ roomId, messageId, userId }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mark Delivered
+// Mark Delivered — batch RTDB read (fixes N+1 per-messageId reads)
 // ─────────────────────────────────────────────────────────────────────────────
 const markDelivered = async (roomId, messageIds, userId) => {
   const roomSnap = await rtdb.ref(`chatRooms/${roomId}`).once("value");
   if (!roomSnap.exists()) throw new Error("Room not found");
   if (!roomSnap.val().participants?.[userId]) throw new Error("Unauthorized");
 
+  // Fetch all messages in one shot instead of N individual reads
+  const messagesSnap = await rtdb.ref(`messages/${roomId}`).once("value");
+  if (!messagesSnap.exists()) return;
+
+  const allMessages = messagesSnap.val();
   const updates = {};
+  const now = Date.now();
+
   for (const messageId of messageIds) {
-    const snap = await rtdb.ref(`messages/${roomId}/${messageId}`).once("value");
-    if (!snap.exists()) continue;
-    const msg = snap.val();
+    const msg = allMessages[messageId];
+    if (!msg) continue;
     if (msg.receiverId !== userId || msg.status !== "sent") continue;
     updates[`${messageId}/status`] = "delivered";
-    updates[`${messageId}/deliveredAt`] = Date.now();
+    updates[`${messageId}/deliveredAt`] = now;
   }
 
   if (Object.keys(updates).length > 0) {
@@ -423,14 +436,16 @@ const updateTyping = async (roomId, userId, isTyping) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Export Chat — returns all non-deleted messages as downloadable text
+// Export Chat — returns all non-deleted messages in chronological order
 // ─────────────────────────────────────────────────────────────────────────────
 const exportChat = async (roomId, userId) => {
   const roomSnap = await rtdb.ref(`chatRooms/${roomId}`).once("value");
   if (!roomSnap.exists()) throw new Error("Room not found");
   if (!roomSnap.val().participants?.[userId]) throw new Error("Unauthorized");
 
-  const messagesSnap = await rtdb.ref(`messages/${roomId}`).orderByChild('createdAt').once("value");
+  // orderByChild('createdAt') already returns in ascending (oldest-first) order
+  // which is correct for a chat export — no reverse needed
+  const messagesSnap = await rtdb.ref(`messages/${roomId}`).orderByChild("createdAt").once("value");
   if (!messagesSnap.exists()) return [];
 
   const messages = [];
@@ -441,7 +456,7 @@ const exportChat = async (roomId, userId) => {
     messages.push(msg);
   });
 
-  return messages.reverse();
+  return messages;
 };
 
 module.exports = {
