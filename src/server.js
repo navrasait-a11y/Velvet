@@ -3,6 +3,7 @@ require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 const app = require("./app");
 const { ensureFirebaseInitialized } = require("./config/firebase");
 const { logger } = require("./utils/logger");
+const { startReminderScheduler } = require("./utils/reminderScheduler");
 
 const PORT = process.env.PORT || 3000;
 
@@ -59,6 +60,8 @@ const startServer = async () => {
 
     // Verify Firebase connection before accepting traffic
     ensureFirebaseInitialized();
+
+    startReminderScheduler();
 
     server = app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} — ${process.env.NODE_ENV || "development"}`);

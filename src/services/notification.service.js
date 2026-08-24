@@ -190,4 +190,12 @@ const notifyGroupInvitation = async ({ inviteeId, inviterName, groupName, groupI
   );
 };
 
-module.exports = { notifyNewMessage, notifyNewGroupMessage, notifyGroupInvitation };
+module.exports = {
+  getFcmToken,
+  sendToToken,
+  sendToTokens,
+  removeStaleToken,
+  notifyNewMessage,
+  notifyNewGroupMessage,
+  notifyGroupInvitation,
+};

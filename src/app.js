@@ -22,6 +22,7 @@ const groupChatRoutes = require("./routes/group.routes");
 const taskRoutes = require("./routes/task.routes");
 const reportRoutes = require("./routes/report.routes");
 const presenceRoutes = require("./routes/presence.routes");
+const reminderRoutes = require("./routes/reminder.routes");
 
 const app = express();
 
@@ -158,6 +159,7 @@ app.use("/api/groupChat", messageLimiter, groupChatRoutes);
 app.use("/api/groupChat", messageLimiter, taskRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/presence", presenceRoutes);
+app.use("/api/reminders", reminderRoutes);
 
 app.get("/health", (_, res) =>
   res.status(200).json({ success: true, service: "Velvet Backend", status: "ok", timestamp: Date.now() })
