@@ -51,8 +51,8 @@ const startServer = async () => {
         process.exit(1);
       }
 
-      if (!process.env.TWO_FACTOR_API_KEY || !process.env.BASE_URL) {
-        logger.error("FATAL: OTP configuration is incomplete. Set TWO_FACTOR_API_KEY and BASE_URL.");
+      if (!process.env.APITXT_API_KEY) {
+        logger.error("FATAL: OTP configuration is incomplete. Set APITXT_API_KEY.");
         process.exit(1);
       }
     }

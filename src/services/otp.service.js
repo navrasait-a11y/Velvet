@@ -1,33 +1,101 @@
 const axios = require("axios");
-const { stripCountryCode } = require("../utils/phoneFormatter");
-/**
- * Sends an OTP to the given phone number via 2Factor API.
- * @param {string} phone - Formatted phone: "91XXXXXXXXXX"
- * @returns {string} sessionId returned by 2Factor
- */
-const sendOtp = async (phone) => {
-  const apiKey = process.env.TWO_FACTOR_API_KEY;
-  const localPhone = stripCountryCode(phone); // 10-digit for 2Factor
+const { randomInt, randomUUID } = require("crypto");
+const { formatPhone, stripCountryCode } = require("../utils/phoneFormatter");
 
-  const url = `${process.env.BASE_URL}/${apiKey}/VOICE/${localPhone}/AUTOGEN`;
+const OTP_TTL_MS = 10 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 15 * 1000;
+const MAX_VERIFICATION_ATTEMPTS = 4;
 
-  const { data } = await axios.get(url, { timeout: 8000 });
+const sessions = new Map();
+const activeSessionsByPhone = new Map();
+const lastOtpRequestByPhone = new Map();
 
-  if (data.Status !== "Success") {
-    throw new Error(data.Details || "Failed to send OTP");
+const removeSession = (sessionId) => {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+
+  sessions.delete(sessionId);
+  clearTimeout(session.expiryTimer);
+  if (activeSessionsByPhone.get(session.phone) === sessionId) {
+    activeSessionsByPhone.delete(session.phone);
   }
-
-  return data.Details; 
 };
 
-/**
- * Verifies the OTP against 2Factor API.
- * @param {string} sessionId - Session ID from sendOtp
- * @param {string} otp - OTP entered by user
- * @returns {boolean} true if verified
- */
-const verifyOtp = async (sessionId, otp) => {
-  // Test bypass — ONLY allowed in non-production environments
+const reserveOtpRequest = (phone) => {
+  const formattedPhone = formatPhone(phone);
+  const now = Date.now();
+
+  for (const [requestedPhone, requestedAt] of lastOtpRequestByPhone) {
+    if (now - requestedAt >= RESEND_COOLDOWN_MS) {
+      lastOtpRequestByPhone.delete(requestedPhone);
+    }
+  }
+
+  const lastRequestAt = lastOtpRequestByPhone.get(formattedPhone);
+
+  if (lastRequestAt !== undefined && now - lastRequestAt < RESEND_COOLDOWN_MS) {
+    const error = new Error("Please wait 15 seconds before requesting another OTP.");
+    error.status = 429;
+    throw error;
+  }
+
+  lastOtpRequestByPhone.set(formattedPhone, now);
+};
+
+const sendOtp = async (phone) => {
+  const formattedPhone = formatPhone(phone);
+  const apiKey = process.env.APITXT_API_KEY;
+  if (!apiKey) {
+    throw new Error("APITXT_API_KEY is not configured.");
+  }
+  reserveOtpRequest(formattedPhone);
+
+  const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const sessionId = randomUUID();
+  const previousSessionId = activeSessionsByPhone.get(formattedPhone);
+  const session = {
+    phone: formattedPhone,
+    otp,
+    expiresAt: Date.now() + OTP_TTL_MS,
+    attempts: 0,
+  };
+
+  sessions.set(sessionId, session);
+  session.expiryTimer = setTimeout(() => removeSession(sessionId), OTP_TTL_MS);
+  session.expiryTimer.unref();
+
+  const baseUrl = (process.env.APITXT_BASE_URL || "https://apitxt.com").replace(/\/+$/, "");
+  const endpoint = (process.env.APITXT_OTP_ENDPOINT || "/api/sendOTP").replace(/^\/+/, "");
+  const url = `${baseUrl}/${endpoint}`;
+  const params = new URLSearchParams({
+    authkey: apiKey,
+    mobile: stripCountryCode(formattedPhone),
+    otp,
+    channel: "sms",
+  });
+  if (process.env.APITXT_TEMPLATE_ID) {
+    params.set("template_id", process.env.APITXT_TEMPLATE_ID);
+  }
+
+  try {
+    await axios.post(url, params, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 8000,
+    });
+  } catch (error) {
+    removeSession(sessionId);
+    throw error;
+  }
+
+  if (previousSessionId) {
+    removeSession(previousSessionId);
+  }
+  activeSessionsByPhone.set(formattedPhone, sessionId);
+
+  return sessionId;
+};
+
+const verifyOtp = async (sessionId, otp, phone) => {
   if (
     process.env.NODE_ENV !== "production" &&
     process.env.TEST_OTP &&
@@ -36,15 +104,28 @@ const verifyOtp = async (sessionId, otp) => {
     return true;
   }
 
-  const apiKey = process.env.TWO_FACTOR_API_KEY;
-  const url = `${process.env.BASE_URL}/${apiKey}/VOICE/VERIFY/${sessionId}/${otp}`;
-  const { data } = await axios.get(url, { timeout: 8000 });
+  const formattedPhone = formatPhone(phone);
+  const session = sessions.get(sessionId);
 
-  if (data.Status !== "Success") {
-    throw new Error(data.Details || "OTP verification failed");
+  if (!session || session.phone !== formattedPhone) {
+    throw new Error("OTP session is invalid or has expired.");
   }
 
+  if (Date.now() >= session.expiresAt) {
+    removeSession(sessionId);
+    throw new Error("OTP session is invalid or has expired.");
+  }
+
+  if (otp !== session.otp) {
+    session.attempts += 1;
+    if (session.attempts >= MAX_VERIFICATION_ATTEMPTS) {
+      removeSession(sessionId);
+    }
+    throw new Error("OTP verification failed.");
+  }
+
+  removeSession(sessionId);
   return true;
 };
 
-module.exports = { sendOtp, verifyOtp };
+module.exports = { sendOtp, verifyOtp, reserveOtpRequest };

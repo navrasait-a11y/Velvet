@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { getDb } = require("../config/firebase");
 const { validationResult } = require("express-validator");
-const { sendOtp, verifyOtp } = require("../services/otp.service");
+const { sendOtp, verifyOtp, reserveOtpRequest } = require("../services/otp.service");
 const { findOrCreateUser, findUserByPhone } = require("../services/user.service");
 const { formatPhone } = require("../utils/phoneFormatter");
 const { setOffline } = require("../services/presence.service");
@@ -26,6 +26,7 @@ const sendOtpHandler = async (req, res) => {
       process.env.TEST_PHONE &&
       phone === process.env.TEST_PHONE
     ) {
+      reserveOtpRequest(phone);
       return res.status(200).json({
         success: true,
         sessionId: "test-session-id-velvet-dev-only",
@@ -35,7 +36,7 @@ const sendOtpHandler = async (req, res) => {
     const sessionId = await sendOtp(phone);
     return res.status(200).json({ success: true, sessionId });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status === 429 ? 429 : 400).json({ success: false, message: err.message });
   }
 };
 
@@ -87,7 +88,7 @@ const verifyUserOtp = async (req, res) => {
 
     const formattedPhone = formatPhone(phone);
 
-    await verifyOtp(sessionId, otp);
+    await verifyOtp(sessionId, otp, formattedPhone);
 
     const existingUser = await findUserByPhone(formattedPhone);
     if (existingUser) {

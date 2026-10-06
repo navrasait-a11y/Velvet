@@ -148,7 +148,25 @@ const otpLimiter = rateLimit({
   message: { success: false, message: "Too many OTP requests. Please wait before retrying." },
 });
 
-app.use("/api/auth/send-otp", otpLimiter);
+const otpMinuteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const rawPhone = String(req.body?.phone || "").replace(/\D/g, "");
+    const phone =
+      rawPhone.length === 10
+        ? `91${rawPhone}`
+        : rawPhone.length === 12 && rawPhone.startsWith("91")
+          ? rawPhone
+          : "";
+    return phone ? `phone:${phone}` : ipKeyGenerator(req);
+  },
+  message: { success: false, message: "Too many OTP requests. Please wait before retrying." },
+});
+
+app.use("/api/auth/send-otp", otpMinuteLimiter, otpLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", authMiddleware, messageLimiter, chatRoutes);
