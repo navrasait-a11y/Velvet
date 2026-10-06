@@ -50,7 +50,7 @@ const sendOtp = async (phone) => {
   }
   reserveOtpRequest(formattedPhone);
 
-  const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const otp = String(randomInt(0, 10_000)).padStart(4, "0");
   const sessionId = randomUUID();
   const previousSessionId = activeSessionsByPhone.get(formattedPhone);
   const session = {

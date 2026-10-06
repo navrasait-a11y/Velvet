@@ -44,7 +44,7 @@ afterEach(() => {
   }
 });
 
-test("sends the generated six-digit OTP through APITxT and verifies that session", async (t) => {
+test("sends the generated four-digit OTP through APITxT and verifies that session", async (t) => {
   let request;
   t.mock.method(axios, "post", async (...args) => {
     request = args;
@@ -61,7 +61,7 @@ test("sends the generated six-digit OTP through APITxT and verifies that session
   assert.equal(form.get("authkey"), "test-api-key");
   assert.equal(form.get("mobile"), "9876543210");
   assert.equal(form.get("channel"), "sms");
-  assert.match(otp, /^\d{6}$/);
+  assert.match(otp, /^\d{4}$/);
   assert.equal(await otpService.verifyOtp(sessionId, otp, "919876543210"), true);
 });
 
@@ -85,7 +85,7 @@ test("expires the OTP session after ten minutes", async (t) => {
   now += 10 * 60 * 1000;
 
   await assert.rejects(
-    otpService.verifyOtp(sessionId, "123456", "9876543212"),
+    otpService.verifyOtp(sessionId, "1234", "9876543212"),
     /invalid or has expired/
   );
 });

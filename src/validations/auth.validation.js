@@ -24,8 +24,8 @@ const verifyOtp = [
     .trim()
     .notEmpty()
     .withMessage("OTP is required")
-    .matches(/^\d{6}$/)
-    .withMessage("OTP must be 6 digits"),
+    .matches(/^\d{4}$/)
+    .withMessage("OTP must be 4 digits"),
 ];
 
 module.exports = {
