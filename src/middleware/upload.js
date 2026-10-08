@@ -138,6 +138,16 @@ const uploadGroupProfileFields = groupUpload.fields([
 
 const uploadSingleFile = chatUpload.single("file");
 
+const uploadReminderFile = (req, res, next) => {
+  chatUpload.single("file")(req, res, (error) => {
+    if (error) return next(error);
+    if (req.file?.buffer && !verifyFileContent(req.file, req.file.mimetype)) {
+      return next(Object.assign(new Error("File content does not match its type"), { status: 400 }));
+    }
+    next();
+  });
+};
+
 // Error handler middleware for multer errors — must be used after upload middleware
 const handleUploadError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
@@ -155,6 +165,7 @@ const handleUploadError = (err, req, res, next) => {
 module.exports = {
   uploadProfileFields,
   uploadSingleFile,
+  uploadReminderFile,
   uploadGroupProfileFields,
   handleUploadError,
 };

@@ -73,4 +73,10 @@ const uploadPublicImage = async (file, folder = "profiles") => {
   return uploadFile(file, folder, true);
 };
 
-module.exports = { uploadFile, uploadPublicImage, getFileType };
+const deleteFile = async (storagePath) => {
+  if (!storagePath) return;
+  const bucket = getBucket();
+  await bucket.file(storagePath).delete({ ignoreNotFound: true });
+};
+
+module.exports = { uploadFile, uploadPublicImage, deleteFile, getFileType };

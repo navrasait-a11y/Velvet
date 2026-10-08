@@ -6,8 +6,10 @@ const reminderController = require("../controller/reminder.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const { sanitize } = require("../middleware/sanitize");
 const { handleValidationErrors } = require("../middleware/handleValidationErrors");
+const { uploadReminderFile, handleUploadError } = require("../middleware/upload");
 const {
   createReminder: createReminderValidation,
+  updateReminder: updateReminderValidation,
   getReminders: getRemindersValidation,
   getReminder: getReminderValidation,
   deleteReminder: deleteReminderValidation,
@@ -20,9 +22,30 @@ const reminderLimiter = rateLimit({
   message: { success: false, message: "Too many reminder requests. Please slow down." },
 });
 
-router.post("/", authMiddleware, reminderLimiter, sanitize, createReminderValidation, handleValidationErrors, reminderController.createReminder);
+router.post(
+  "/",
+  authMiddleware,
+  reminderLimiter,
+  uploadReminderFile,
+  handleUploadError,
+  sanitize,
+  createReminderValidation,
+  handleValidationErrors,
+  reminderController.createReminder
+);
 router.get("/", authMiddleware, getRemindersValidation, handleValidationErrors, reminderController.getReminders);
 router.get("/:reminderId", authMiddleware, getReminderValidation, handleValidationErrors, reminderController.getReminder);
+router.put(
+  "/:reminderId",
+  authMiddleware,
+  reminderLimiter,
+  uploadReminderFile,
+  handleUploadError,
+  sanitize,
+  updateReminderValidation,
+  handleValidationErrors,
+  reminderController.updateReminder
+);
 router.delete("/:reminderId", authMiddleware, deleteReminderValidation, handleValidationErrors, reminderController.deleteReminder);
 
 module.exports = router;
