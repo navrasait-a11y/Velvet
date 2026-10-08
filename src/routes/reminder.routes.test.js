@@ -284,7 +284,48 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
 
     const listResponse = await request("GET", "");
     const listPayload = await listResponse.json();
-    assert.equal(listPayload.data.find((reminder) => reminder.reminderId === reminderId).status, "cancelled");
+    assert.ok(!listPayload.data.some((reminder) => reminder.reminderId === reminderId));
+    assert.equal(getAt(`reminders/${reminderId}`).status, "cancelled");
+  });
+
+  await t.test("hide sent and completed reminders from the list without deleting records", async () => {
+    const reminderBase = {
+      createdBy: userId,
+      scheduledAt: Date.now() + 60_000,
+      message: "Reminder status list test",
+    };
+    setAt("reminders/list-pending-123", {
+      ...reminderBase,
+      reminderId: "list-pending-123",
+      status: "pending",
+    });
+    setAt("reminders/list-cancelled-123", {
+      ...reminderBase,
+      reminderId: "list-cancelled-123",
+      status: "cancelled",
+    });
+    setAt("reminders/list-sent-123", {
+      ...reminderBase,
+      reminderId: "list-sent-123",
+      status: "sent",
+    });
+    setAt("reminders/list-completed-123", {
+      ...reminderBase,
+      reminderId: "list-completed-123",
+      status: "completed",
+    });
+
+    const response = await request("GET", "");
+    const payload = await response.json();
+    const listedIds = payload.data.map((reminder) => reminder.reminderId);
+
+    assert.ok(listedIds.includes("list-pending-123"));
+    assert.ok(!listedIds.includes("list-cancelled-123"));
+    assert.ok(!listedIds.includes("list-sent-123"));
+    assert.ok(!listedIds.includes("list-completed-123"));
+    assert.equal(getAt("reminders/list-cancelled-123").status, "cancelled");
+    assert.equal(getAt("reminders/list-sent-123").status, "sent");
+    assert.equal(getAt("reminders/list-completed-123").status, "completed");
   });
 
   await t.test("reject cancellation of a past pending or already-triggered reminder", async () => {

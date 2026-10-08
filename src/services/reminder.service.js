@@ -10,6 +10,7 @@ const STATUS_PENDING = "pending";
 const STATUS_PROCESSING = "processing";
 const STATUS_SENT = "sent";
 const STATUS_CANCELLED = "cancelled";
+const HIDDEN_REMINDER_STATUSES = new Set([STATUS_SENT, STATUS_CANCELLED, "completed"]);
 
 const parseScheduledAt = (scheduledAt) => {
   if (
@@ -199,7 +200,12 @@ exports.getReminders = async (userId) => {
   const reminders = [];
   snapshot.forEach((child) => {
     const r = child.val();
-    if (r.createdBy === userId) reminders.push({ ...r, reminderId: child.key });
+    if (
+      r.createdBy === userId &&
+      !HIDDEN_REMINDER_STATUSES.has(r.status)
+    ) {
+      reminders.push({ ...r, reminderId: child.key });
+    }
   });
 
   reminders.sort((a, b) => (b.scheduledAt || 0) - (a.scheduledAt || 0));
