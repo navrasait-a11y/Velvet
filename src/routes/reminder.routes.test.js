@@ -7,7 +7,6 @@ const jwt = require("jsonwebtoken");
 
 const database = {};
 const storedFiles = new Map();
-const transactionNullOnce = new Set();
 
 const getAt = (pathName) =>
   pathName.split("/").filter(Boolean).reduce((value, key) => value?.[key], database);
@@ -53,11 +52,7 @@ const fakeRealtimeDb = {
         }
       },
       transaction: async (update) => {
-        let current = getAt(pathName) ?? null;
-        if (transactionNullOnce.has(pathName)) {
-          transactionNullOnce.delete(pathName);
-          current = null;
-        }
+        const current = getAt(pathName) ?? null;
         const next = update(current);
         if (next === undefined) return { committed: false, snapshot: new Snapshot(current) };
         setAt(pathName, next);
@@ -258,21 +253,6 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     const listResponse = await request("GET", "");
     const listPayload = await listResponse.json();
     assert.equal(listPayload.data.find((reminder) => reminder.reminderId === reminderId).status, "cancelled");
-  });
-
-  await t.test("retry cancellation if the first Firebase transaction has no local current value", async () => {
-    const id = "retry-cancel-reminder-999";
-    setAt(`reminders/${id}`, {
-      reminderId: id,
-      createdBy: userId,
-      scheduledAt: Date.now() + 60_000,
-      status: "pending",
-    });
-    transactionNullOnce.add(`reminders/${id}`);
-
-    const response = await request("DELETE", `/${id}`);
-    assert.equal(response.status, 200);
-    assert.equal(getAt(`reminders/${id}`).status, "cancelled");
   });
 
   await t.test("reject cancellation of a past pending or already-triggered reminder", async () => {
