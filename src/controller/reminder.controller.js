@@ -67,7 +67,7 @@ exports.createReminder = async (req, res) => {
 exports.updateReminder = async (req, res) => {
   let attachment = null;
   try {
-    const { reminderId } = req.params;
+    const reminderId = req.params.id || req.params.reminderId;
     const changes = { ...req.body };
     if (Object.prototype.hasOwnProperty.call(changes, "mentions")) {
       changes.mentions = getMentions(changes.mentions);
@@ -101,7 +101,7 @@ exports.getReminders = async (req, res) => {
 exports.getReminder = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { reminderId } = req.params;
+    const reminderId = req.params.id || req.params.reminderId;
 
     const reminder = await reminderService.getReminder(reminderId, userId);
     return res.status(200).json({ success: true, data: reminder });
@@ -114,7 +114,7 @@ exports.getReminder = async (req, res) => {
 exports.deleteReminder = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { reminderId } = req.params;
+    const reminderId = req.params.id || req.params.reminderId;
 
     await reminderService.cancelReminder(reminderId, userId);
     return res.status(200).json({ success: true, message: "Reminder cancelled" });

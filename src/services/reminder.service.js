@@ -34,6 +34,33 @@ const requireFutureTimestamp = (timestamp) => {
 const normalizeMentions = (mentions = []) =>
   Array.isArray(mentions) ? mentions.filter((id) => typeof id === "string") : [];
 
+const findReminderById = async (reminderId) => {
+  const directSnapshot = await rtdb.ref(`reminders/${reminderId}`).once("value");
+  if (directSnapshot.exists()) {
+    return { key: reminderId, reminder: directSnapshot.val() };
+  }
+
+  const remindersSnapshot = await rtdb.ref("reminders").once("value");
+  if (!remindersSnapshot.exists()) return null;
+
+  let match = null;
+  remindersSnapshot.forEach((child) => {
+    if (!match && child.val()?.reminderId === reminderId) {
+      match = { key: child.key, reminder: child.val() };
+    }
+  });
+  return match;
+};
+
+const logReminderOperation = (operation, reminderId, userId, record) => {
+  logger.info(
+    `[Reminder] ${operation} method=${operation === "update" ? "PUT" : "DELETE"} ` +
+    `route=/api/reminders/:id reminderId=${reminderId} userId=${userId} ` +
+    `databasePath=reminders/${record?.key || reminderId} found=${Boolean(record)} ` +
+    `status=${record?.reminder?.status || "unknown"}`
+  );
+};
+
 const assertTargetIsAvailable = async ({ createdBy, targetType, targetId, receiverId }) => {
   if (targetType === "group") {
     const groupSnap = await rtdb.ref(`groups/${targetId}`).once("value");
@@ -99,11 +126,12 @@ exports.createReminder = async ({
 };
 
 exports.updateReminder = async (reminderId, userId, changes) => {
-  const reminderRef = rtdb.ref(`reminders/${reminderId}`);
-  const existingSnapshot = await reminderRef.once("value");
-  if (!existingSnapshot.exists()) throw new Error("Reminder not found");
+  const record = await findReminderById(reminderId);
+  logReminderOperation("update", reminderId, userId, record);
+  if (!record) throw new Error("Reminder not found");
 
-  const existing = existingSnapshot.val();
+  const reminderRef = rtdb.ref(`reminders/${record.key}`);
+  const existing = record.reminder;
   if (existing.createdBy !== userId) {
     throw new Error("Only the creator can edit this reminder");
   }
@@ -123,6 +151,7 @@ exports.updateReminder = async (reminderId, userId, changes) => {
   await assertTargetIsAvailable({ createdBy: userId, targetType, targetId, receiverId });
 
   const update = {};
+  update.reminderId = record.key;
   for (const field of ["message", "targetType", "targetId", "receiverId"]) {
     if (has(field)) update[field] = field === "message" ? changes[field].trim() : changes[field];
   }
@@ -175,7 +204,7 @@ exports.getReminders = async (userId) => {
   const reminders = [];
   snapshot.forEach((child) => {
     const r = child.val();
-    if (r.createdBy === userId) reminders.push(r);
+    if (r.createdBy === userId) reminders.push({ ...r, reminderId: child.key });
   });
 
   reminders.sort((a, b) => (b.scheduledAt || 0) - (a.scheduledAt || 0));
@@ -183,10 +212,10 @@ exports.getReminders = async (userId) => {
 };
 
 exports.getReminder = async (reminderId, userId) => {
-  const snap = await rtdb.ref(`reminders/${reminderId}`).once("value");
-  if (!snap.exists()) throw new Error("Reminder not found");
+  const record = await findReminderById(reminderId);
+  if (!record) throw new Error("Reminder not found");
 
-  const reminder = snap.val();
+  const reminder = { ...record.reminder, reminderId: record.key };
   if (reminder.createdBy !== userId) {
     throw new Error("Only the creator can view this reminder");
   }
@@ -194,8 +223,12 @@ exports.getReminder = async (reminderId, userId) => {
 };
 
 exports.cancelReminder = async (reminderId, userId) => {
+  const record = await findReminderById(reminderId);
+  logReminderOperation("delete", reminderId, userId, record);
+  if (!record) throw new Error("Reminder not found");
+
   let transactionError;
-  const result = await rtdb.ref(`reminders/${reminderId}`).transaction((current) => {
+  const result = await rtdb.ref(`reminders/${record.key}`).transaction((current) => {
     if (!current) {
       transactionError = "Reminder not found";
       return;

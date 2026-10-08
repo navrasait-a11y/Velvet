@@ -34,9 +34,9 @@ router.post(
   reminderController.createReminder
 );
 router.get("/", authMiddleware, getRemindersValidation, handleValidationErrors, reminderController.getReminders);
-router.get("/:reminderId", authMiddleware, getReminderValidation, handleValidationErrors, reminderController.getReminder);
+router.get("/:id", authMiddleware, getReminderValidation, handleValidationErrors, reminderController.getReminder);
 router.put(
-  "/:reminderId",
+  "/:id",
   authMiddleware,
   reminderLimiter,
   uploadReminderFile,
@@ -46,6 +46,6 @@ router.put(
   handleValidationErrors,
   reminderController.updateReminder
 );
-router.delete("/:reminderId", authMiddleware, deleteReminderValidation, handleValidationErrors, reminderController.deleteReminder);
+router.delete("/:id", authMiddleware, deleteReminderValidation, handleValidationErrors, reminderController.deleteReminder);
 
 module.exports = router;

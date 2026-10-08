@@ -3,7 +3,6 @@ const http = require("node:http");
 const Module = require("node:module");
 const path = require("node:path");
 const test = require("node:test");
-const express = require("express");
 const jwt = require("jsonwebtoken");
 
 const database = {};
@@ -86,10 +85,7 @@ require.cache[firebaseConfigPath] = fakeFirebaseConfig;
 process.env.JWT_SECRET = "reminder-test-secret";
 process.env.NODE_ENV = "test";
 
-const reminderRoutes = require("./reminder.routes");
-const app = express();
-app.use(express.json());
-app.use("/api/reminders", reminderRoutes);
+const app = require("../app");
 
 const server = http.createServer(app);
 const userId = "test-user-100";
@@ -135,7 +131,8 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
-  await t.test("create without a file and reject past dates at the API", async () => {
+  let noFileReminderId;
+  await t.test("create without a file, retrieve by the returned ID, and reject past dates", async () => {
     const response = await request("POST", "", {
       body: reminderFields(new Date(Date.now() + 60 * 60 * 1000).toISOString()),
     });
@@ -143,6 +140,12 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     assert.equal(response.status, 201);
     assert.equal(payload.data.status, "pending");
     assert.equal(payload.data.attachment, null);
+    noFileReminderId = payload.data.reminderId;
+
+    const getResponse = await request("GET", `/${noFileReminderId}`);
+    const getPayload = await getResponse.json();
+    assert.equal(getResponse.status, 200);
+    assert.equal(getPayload.data.reminderId, noFileReminderId);
 
     const pastResponse = await request("POST", "", {
       body: reminderFields(new Date(Date.now() - 60 * 1000).toISOString()),
@@ -264,5 +267,70 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     const sentResponse = await request("DELETE", "/sent-reminder-123");
     assert.equal(sentResponse.status, 409);
     assert.equal(getAt("reminders/sent-reminder-123").status, "sent");
+  });
+
+  await t.test("resolve legacy IDs that differ from the Realtime Database child key", async () => {
+    const dbKey = "database-key-reminder-456";
+    const internalId = "legacy-internal-reminder-789";
+    setAt(`reminders/${dbKey}`, {
+      reminderId: internalId,
+      createdBy: userId,
+      message: "Legacy reminder",
+      targetType: "private_chat",
+      targetId: receiverId,
+      receiverId,
+      scheduledAt: Date.now() + 60 * 60 * 1000,
+      status: "pending",
+    });
+
+    const listResponse = await request("GET", "");
+    const listPayload = await listResponse.json();
+    const listed = listPayload.data.find((reminder) => reminder.reminderId === dbKey);
+    assert.ok(listed);
+    assert.notEqual(listed.reminderId, internalId);
+
+    const legacyIdResponse = await request("GET", `/${internalId}`);
+    const legacyIdPayload = await legacyIdResponse.json();
+    assert.equal(legacyIdResponse.status, 200);
+    assert.equal(legacyIdPayload.data.reminderId, dbKey);
+
+    const legacyUpdateResponse = await request("PUT", `/${internalId}`, {
+      body: { message: "Updated by legacy ID" },
+    });
+    assert.equal(legacyUpdateResponse.status, 200);
+    assert.equal(getAt(`reminders/${dbKey}`).message, "Updated by legacy ID");
+
+    const updateResponse = await request("PUT", `/${listed.reminderId}`, {
+      body: { message: "Updated legacy reminder" },
+    });
+    assert.equal(updateResponse.status, 200);
+    assert.equal(getAt(`reminders/${dbKey}`).message, "Updated legacy reminder");
+
+    const deleteResponse = await request("DELETE", `/${listed.reminderId}`);
+    assert.equal(deleteResponse.status, 200);
+    assert.equal(getAt(`reminders/${dbKey}`).status, "cancelled");
+    assert.equal(getAt(`reminders/${dbKey}`).reminderId, dbKey);
+  });
+
+  await t.test("distinguish missing, malformed, and unauthorized Reminder IDs", async () => {
+    const missingResponse = await request("DELETE", "/missing-reminder-id");
+    assert.equal(missingResponse.status, 404);
+    assert.equal((await missingResponse.json()).message, "Reminder not found");
+
+    const malformedResponse = await request("DELETE", "/bad");
+    assert.equal(malformedResponse.status, 400);
+
+    const ownedReminderId = "owned-reminder-234";
+    setAt(`reminders/${ownedReminderId}`, {
+      reminderId: ownedReminderId,
+      createdBy: userId,
+      scheduledAt: Date.now() + 60_000,
+      status: "pending",
+    });
+    const unauthorizedResponse = await request("DELETE", `/${ownedReminderId}`, {
+      token: "different-user-300",
+    });
+    assert.equal(unauthorizedResponse.status, 403);
+    assert.equal(getAt(`reminders/${ownedReminderId}`).status, "pending");
   });
 });

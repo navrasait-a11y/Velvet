@@ -1,6 +1,6 @@
 const { body, param } = require("express-validator");
 
-const validateReminderId = param("reminderId")
+const validateReminderId = param("id")
   .isString()
   .isLength({ min: 5, max: 100 })
   .withMessage("Invalid reminderId");
