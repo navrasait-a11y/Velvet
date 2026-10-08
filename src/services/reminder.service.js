@@ -214,41 +214,36 @@ exports.getReminder = async (reminderId, userId) => {
 };
 
 exports.cancelReminder = async (reminderId, userId) => {
-  let record = await findReminderById(reminderId);
+  const record = await findReminderById(reminderId);
   if (!record) throw new Error("Reminder not found");
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let transactionError;
-    const result = await rtdb.ref(`reminders/${record.key}`).transaction((current) => {
-      if (!current) {
-        transactionError = "Reminder not found";
-        return;
-      }
-      if (current.createdBy !== userId) {
-        transactionError = "Only the creator can cancel this reminder";
-        return;
-      }
-      if (current.status !== STATUS_PENDING) {
-        transactionError = "Only pending reminders can be cancelled";
-        return;
-      }
-      if (current.scheduledAt <= Date.now()) {
-        transactionError = "Only future reminders can be cancelled";
-        return;
-      }
-      return { ...current, status: STATUS_CANCELLED, cancelledAt: Date.now() };
-    });
-
-    if (result.committed) return;
-    if (transactionError !== "Reminder not found") {
-      throw new Error(transactionError || "Reminder could not be cancelled");
+  let transactionError;
+  const result = await rtdb.ref(`reminders/${record.key}`).transaction((current) => {
+    if (!current) {
+      // A null local cache must still reach Firebase's server-side compare.
+      // Returning undefined would abort before checking whether the record exists remotely.
+      return null;
     }
-
-    record = await findReminderById(reminderId);
-    if (!record) throw new Error("Reminder not found");
+    if (current.createdBy !== userId) {
+      transactionError = "Only the creator can cancel this reminder";
+      return;
+    }
+    if (current.status !== STATUS_PENDING) {
+      transactionError = "Only pending reminders can be cancelled";
+      return;
+    }
+    if (current.scheduledAt <= Date.now()) {
+      transactionError = "Only future reminders can be cancelled";
+      return;
+    }
+    return { ...current, status: STATUS_CANCELLED, cancelledAt: Date.now() };
+  });
+  if (result.committed && result.snapshot.val() === null) {
+    throw new Error("Reminder not found");
   }
-
-  throw new Error("Reminder could not be cancelled; please retry");
+  if (!result.committed) {
+    throw new Error(transactionError || "Reminder could not be cancelled");
+  }
 };
 
 exports.getDueReminders = async () => {
