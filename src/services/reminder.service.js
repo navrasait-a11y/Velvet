@@ -157,8 +157,9 @@ exports.updateReminder = async (reminderId, userId, changes) => {
   let transactionError;
   const result = await reminderRef.transaction((current) => {
     if (!current) {
-      transactionError = "Reminder not found";
-      return;
+      // Allow Firebase to compare against the server when its local cache is empty.
+      // Returning undefined here aborts the transaction without checking the server value.
+      return null;
     }
     if (current.createdBy !== userId) {
       transactionError = "Only the creator can edit this reminder";
@@ -175,6 +176,9 @@ exports.updateReminder = async (reminderId, userId, changes) => {
     return { ...current, ...update };
   });
 
+  if (result.committed && result.snapshot.val() === null) {
+    throw new Error("Reminder not found");
+  }
   if (!result.committed) throw new Error(transactionError || "Reminder could not be updated");
 
   if (has("attachment") && existing.attachment?.storagePath) {

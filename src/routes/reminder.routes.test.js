@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 
 const database = {};
 const storedFiles = new Map();
+const transactionNullOnce = new Set();
 
 const getAt = (pathName) =>
   pathName.split("/").filter(Boolean).reduce((value, key) => value?.[key], database);
@@ -53,7 +54,15 @@ const fakeRealtimeDb = {
       },
       transaction: async (update) => {
         const current = getAt(pathName) ?? null;
-        const next = update(current);
+        let localValue = current;
+        if (transactionNullOnce.has(pathName)) {
+          transactionNullOnce.delete(pathName);
+          localValue = null;
+        }
+        let next = update(localValue);
+        if (localValue === null && current !== null && next === null) {
+          next = update(current);
+        }
         if (next === undefined) return { committed: false, snapshot: new Snapshot(current) };
         setAt(pathName, next);
         return { committed: true, snapshot: new Snapshot(next) };
@@ -240,6 +249,29 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     assert.notEqual(replacementPayload.data.attachment.storagePath, original.attachment.storagePath);
     assert.equal(storedFiles.has(original.attachment.storagePath), false);
     assert.equal(storedFiles.get(replacementPayload.data.attachment.storagePath).buffer.toString(), "replacement attachment");
+  });
+
+  await t.test("update retries against the current server value when the local transaction cache is empty", async () => {
+    const id = "retry-update-reminder-888";
+    setAt(`reminders/${id}`, {
+      reminderId: id,
+      createdBy: userId,
+      message: "Original message",
+      targetType: "private_chat",
+      targetId: receiverId,
+      receiverId,
+      scheduledAt: Date.now() + 60_000,
+      status: "pending",
+    });
+    transactionNullOnce.add(`reminders/${id}`);
+
+    const response = await request("PUT", `/${id}`, {
+      body: { message: "Saved despite empty local transaction cache" },
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.message, "Saved despite empty local transaction cache");
+    assert.equal(getAt(`reminders/${id}`).message, "Saved despite empty local transaction cache");
   });
 
   await t.test("cancel a future pending reminder once and expose its cancelled status", async () => {
