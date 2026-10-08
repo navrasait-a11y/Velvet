@@ -35,7 +35,8 @@ const normalizeMentions = (mentions = []) =>
   Array.isArray(mentions) ? mentions.filter((id) => typeof id === "string") : [];
 
 const findReminderById = async (reminderId) => {
-  const directSnapshot = await rtdb.ref(`reminders/${reminderId}`).once("value");
+  const directPath = `reminders/${reminderId}`;
+  const directSnapshot = await rtdb.ref(directPath).once("value");
   if (directSnapshot.exists()) {
     return { key: reminderId, reminder: directSnapshot.val() };
   }
@@ -50,15 +51,6 @@ const findReminderById = async (reminderId) => {
     }
   });
   return match;
-};
-
-const logReminderOperation = (operation, reminderId, userId, record) => {
-  logger.info(
-    `[Reminder] ${operation} method=${operation === "update" ? "PUT" : "DELETE"} ` +
-    `route=/api/reminders/:id reminderId=${reminderId} userId=${userId} ` +
-    `databasePath=reminders/${record?.key || reminderId} found=${Boolean(record)} ` +
-    `status=${record?.reminder?.status || "unknown"}`
-  );
 };
 
 const assertTargetIsAvailable = async ({ createdBy, targetType, targetId, receiverId }) => {
@@ -127,7 +119,6 @@ exports.createReminder = async ({
 
 exports.updateReminder = async (reminderId, userId, changes) => {
   const record = await findReminderById(reminderId);
-  logReminderOperation("update", reminderId, userId, record);
   if (!record) throw new Error("Reminder not found");
 
   const reminderRef = rtdb.ref(`reminders/${record.key}`);
@@ -224,7 +215,6 @@ exports.getReminder = async (reminderId, userId) => {
 
 exports.cancelReminder = async (reminderId, userId) => {
   const record = await findReminderById(reminderId);
-  logReminderOperation("delete", reminderId, userId, record);
   if (!record) throw new Error("Reminder not found");
 
   let transactionError;

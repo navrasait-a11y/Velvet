@@ -181,7 +181,11 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     assert.match(payload.data.attachment.url, /^https:\/\/storage\.test\//);
     assert.equal(storedFiles.get(payload.data.attachment.storagePath).buffer.toString(), "actual reminder attachment");
     assert.equal(getAt(`reminders/${payload.data.reminderId}`).attachment.storagePath, payload.data.attachment.storagePath);
-    reminderId = payload.data.reminderId;
+    const listResponse = await request("GET", "");
+    const listPayload = await listResponse.json();
+    const listedReminder = listPayload.data.find((reminder) => reminder.reminderId === payload.data.reminderId);
+    assert.ok(listedReminder);
+    reminderId = listedReminder.reminderId;
   });
 
   await t.test("reject file content that does not match its declared type", async () => {
