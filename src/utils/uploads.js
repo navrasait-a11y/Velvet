@@ -79,4 +79,17 @@ const deleteFile = async (storagePath) => {
   await bucket.file(storagePath).delete({ ignoreNotFound: true });
 };
 
-module.exports = { uploadFile, uploadPublicImage, deleteFile, getFileType };
+const refreshFileUrl = async (file) => {
+  if (!file?.storagePath) {
+    throw new Error("Uploaded file is missing its storage path");
+  }
+
+  const [url] = await getBucket().file(file.storagePath).getSignedUrl({
+    action: "read",
+    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  });
+
+  return { ...file, url };
+};
+
+module.exports = { uploadFile, uploadPublicImage, deleteFile, refreshFileUrl, getFileType };

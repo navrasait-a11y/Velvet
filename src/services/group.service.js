@@ -652,7 +652,7 @@ exports.getGroupDetails = async (groupId, requestingUserId) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Send Group Message
-// Only accepted members can send. Text only (MVP scope).
+// Only accepted members can send.
 // Link filtering is handled at middleware level.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.sendGroupMessage = async ({
@@ -660,6 +660,7 @@ exports.sendGroupMessage = async ({
   senderId,
   message,
   type = "text",
+  media = null,
 }) => {
   const group = await fetchGroup(groupId);
 
@@ -679,6 +680,7 @@ exports.sendGroupMessage = async ({
     senderId,
     type,
     text: type === "text" ? message : null,
+    media: media || null,
     status: "sent",
     createdAt: timestamp,
     deletedFor: {},

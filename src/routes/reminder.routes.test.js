@@ -8,6 +8,7 @@ const jwt = require("jsonwebtoken");
 const database = {};
 const storedFiles = new Map();
 const transactionNullOnce = new Set();
+let nextMessageId = 0;
 
 const getAt = (pathName) =>
   pathName.split("/").filter(Boolean).reduce((value, key) => value?.[key], database);
@@ -52,6 +53,7 @@ const fakeRealtimeDb = {
           setAt([pathName, key].filter(Boolean).join("/"), value);
         }
       },
+      push: () => ({ key: `test-message-${++nextMessageId}` }),
       transaction: async (update) => {
         const current = getAt(pathName) ?? null;
         let localValue = current;
@@ -86,7 +88,13 @@ const firebaseConfigPath = path.resolve(__dirname, "../config/firebase.js");
 const fakeFirebaseConfig = new Module(firebaseConfigPath, module);
 fakeFirebaseConfig.exports = {
   getRealtimeDb: () => fakeRealtimeDb,
-  getDb: () => ({}),
+  getDb: () => ({
+    collection: () => ({
+      doc: () => ({
+        get: async () => ({ exists: false, data: () => ({}) }),
+      }),
+    }),
+  }),
   getBucket: () => fakeBucket,
 };
 require.cache[firebaseConfigPath] = fakeFirebaseConfig;
@@ -95,6 +103,7 @@ process.env.JWT_SECRET = "reminder-test-secret";
 process.env.NODE_ENV = "test";
 
 const app = require("../app");
+const { deliverReminder } = require("../utils/reminderScheduler");
 
 const server = http.createServer(app);
 const userId = "test-user-100";
@@ -176,25 +185,49 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
 
   let reminderId;
   await t.test("receive and store a multipart file with the reminder", async () => {
+    const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const response = await request("POST", "", {
       body: formWithReminder(reminderFields(new Date(Date.now() + 60 * 60 * 1000).toISOString()), {
-        name: "notes.txt",
-        type: "text/plain",
-        contents: "actual reminder attachment",
+        name: "reminder.png",
+        type: "image/png",
+        contents: imageBytes,
       }),
     });
     const payload = await response.json();
     assert.equal(response.status, 201);
-    assert.equal(payload.data.attachment.fileType, "document");
-    assert.equal(payload.data.attachment.mimeType, "text/plain");
+    assert.equal(payload.data.attachment.fileType, "image");
+    assert.equal(payload.data.attachment.mimeType, "image/png");
     assert.match(payload.data.attachment.url, /^https:\/\/storage\.test\//);
-    assert.equal(storedFiles.get(payload.data.attachment.storagePath).buffer.toString(), "actual reminder attachment");
+    assert.deepEqual(storedFiles.get(payload.data.attachment.storagePath).buffer, imageBytes);
     assert.equal(getAt(`reminders/${payload.data.reminderId}`).attachment.storagePath, payload.data.attachment.storagePath);
     const listResponse = await request("GET", "");
     const listPayload = await listResponse.json();
     const listedReminder = listPayload.data.find((reminder) => reminder.reminderId === payload.data.reminderId);
     assert.ok(listedReminder);
     reminderId = listedReminder.reminderId;
+  });
+
+  await t.test("deliver Reminder text and uploaded attachment to the private chat", async () => {
+    const reminder = getAt(`reminders/${reminderId}`);
+    await deliverReminder(reminder);
+
+    const messages = getAt(`messages/${roomId}`);
+    const delivered = Object.values(messages);
+    const reminderText = delivered.find(
+      (message) => message.type === "text" && message.text === reminder.message
+    );
+    const attachmentMessage = delivered.find(
+      (message) => message.type === reminder.attachment.fileType
+    );
+
+    assert.ok(reminderText);
+    assert.ok(attachmentMessage);
+    assert.deepEqual(attachmentMessage.media, {
+      ...reminder.attachment,
+      url: `https://storage.test/${reminder.attachment.storagePath}`,
+    });
+    assert.equal(attachmentMessage.senderId, userId);
+    assert.equal(attachmentMessage.receiverId, receiverId);
   });
 
   await t.test("reject file content that does not match its declared type", async () => {

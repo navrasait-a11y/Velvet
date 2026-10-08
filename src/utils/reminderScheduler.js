@@ -4,6 +4,7 @@ const chatService = require("../services/chat.service");
 const reminderService = require("../services/reminder.service");
 const { getFcmToken, sendToToken } = require("../services/notification.service");
 const { logger } = require("../utils/logger");
+const { refreshFileUrl } = require("./uploads");
 
 const rtdb = getRealtimeDb();
 const db = getDb();
@@ -49,6 +50,9 @@ const notifyMentionedUsers = async (mentionedUserIds, senderName, message, roomI
 
 const deliverReminder = async (reminder) => {
   const { createdBy, message, targetType, targetId, receiverId, mentions = [] } = reminder;
+  const attachment = reminder.attachment
+    ? await refreshFileUrl(reminder.attachment)
+    : null;
   const senderName = await getSenderName(createdBy);
 
   if (targetType === "group") {
@@ -66,6 +70,15 @@ const deliverReminder = async (reminder) => {
       message,
       type: "text",
     });
+    if (attachment) {
+      await groupService.sendGroupMessage({
+        groupId: targetId,
+        senderId: createdBy,
+        message: "",
+        type: attachment.fileType,
+        media: attachment,
+      });
+    }
 
     const allMentionIds = mentions.filter((id) => id !== createdBy);
     if (allMentionIds.length > 0) {
@@ -86,6 +99,15 @@ const deliverReminder = async (reminder) => {
       message,
       type: "text",
     });
+    if (attachment) {
+      await chatService.sendMessage({
+        roomId,
+        senderId: createdBy,
+        receiverId: actualReceiverId,
+        type: attachment.fileType,
+        media: attachment,
+      });
+    }
 
     const notifyIds = [actualReceiverId, ...mentions].filter((id) => id !== createdBy);
     const uniqueNotifyIds = [...new Set(notifyIds)];
@@ -129,4 +151,4 @@ const startReminderScheduler = () => {
   logger.info(`[ReminderScheduler] Started. Polling interval: ${SCHEDULER_INTERVAL_MS}ms`);
 };
 
-module.exports = { startReminderScheduler };
+module.exports = { startReminderScheduler, deliverReminder };
