@@ -16,7 +16,8 @@ const { logger } = require("../utils/logger");
 const getFcmToken = async (userId) => {
   const doc = await db.collection("users").doc(userId).get();
   if (!doc.exists) return null;
-  return doc.data().fcmToken || null;
+  const user = doc.data();
+  return user.pushNotificationsEnabled === false ? null : user.fcmToken || null;
 };
 
 const getFcmTokens = async (userIds) => {
@@ -38,7 +39,8 @@ const getFcmTokens = async (userIds) => {
   const tokens = [];
   snapshots.forEach((snap) => {
     snap.forEach((doc) => {
-      const token = doc.data().fcmToken;
+      const user = doc.data();
+      const token = user.pushNotificationsEnabled === false ? null : user.fcmToken;
       if (token) tokens.push(token);
     });
   });

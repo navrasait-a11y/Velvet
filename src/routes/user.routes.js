@@ -6,7 +6,12 @@ const authMiddleware = require("../middleware/auth.middleware");
 const { uploadProfileFields, handleUploadError } = require("../middleware/upload");
 const { sanitize } = require("../middleware/sanitize");
 const { handleValidationErrors } = require("../middleware/handleValidationErrors");
-const { createProfile, updateProfile, checkContact } = require("../validations/user.validation");
+const {
+  createProfile,
+  updateProfile,
+  checkContact,
+  updateNotificationPreferences,
+} = require("../validations/user.validation");
 
 router.post(
   "/create",
@@ -31,6 +36,15 @@ router.patch(
 );
 
 router.get("/me", authMiddleware, profileController.getProfile);
+
+router.get("/notification-preferences", authMiddleware, profileController.getNotificationPreferences);
+router.patch(
+  "/notification-preferences",
+  authMiddleware,
+  updateNotificationPreferences,
+  handleValidationErrors,
+  profileController.updateNotificationPreferences
+);
 
 router.get("/profile/:userId", authMiddleware, profileController.getUserProfile);
 

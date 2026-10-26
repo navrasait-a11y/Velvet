@@ -44,6 +44,7 @@ const findOrCreateUser = async (phone) => {
     tx.set(usersRef.doc(newUserId), {
       userId: newUserId,
       phone,
+      pushNotificationsEnabled: true,
       createdAt: getTimestamp(),
     });
 

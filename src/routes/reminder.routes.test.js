@@ -151,19 +151,60 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
 
   let noFileReminderId;
   await t.test("create without a file, retrieve by the returned ID, and reject past dates", async () => {
+    const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const response = await request("POST", "", {
-      body: reminderFields(new Date(Date.now() + 60 * 60 * 1000).toISOString()),
+      body: {
+        ...reminderFields(scheduledAt),
+        title: "Call family",
+        emoji: "📞",
+        type: "personal",
+      },
     });
     const payload = await response.json();
     assert.equal(response.status, 201);
     assert.equal(payload.data.status, "pending");
     assert.equal(payload.data.attachment, null);
+    assert.equal(payload.data.title, "Call family");
+    assert.equal(payload.data.emoji, "📞");
+    assert.equal(payload.data.type, "personal");
     noFileReminderId = payload.data.reminderId;
 
     const getResponse = await request("GET", `/${noFileReminderId}`);
     const getPayload = await getResponse.json();
     assert.equal(getResponse.status, 200);
     assert.equal(getPayload.data.reminderId, noFileReminderId);
+
+    const startAt = new Date(Date.parse(scheduledAt) - 1000).toISOString();
+    const endAt = new Date(Date.parse(scheduledAt) + 1000).toISOString();
+    const rangeResponse = await request("GET", `?startAt=${encodeURIComponent(startAt)}&endAt=${encodeURIComponent(endAt)}`);
+    const rangePayload = await rangeResponse.json();
+    assert.equal(rangeResponse.status, 200);
+    assert.ok(rangePayload.data.some((reminder) => reminder.reminderId === noFileReminderId));
+
+    const exactBoundaryResponse = await request(
+      "GET",
+      `?startAt=${encodeURIComponent(scheduledAt)}&endAt=${encodeURIComponent(scheduledAt)}`
+    );
+    const exactBoundaryPayload = await exactBoundaryResponse.json();
+    assert.equal(exactBoundaryResponse.status, 200);
+    assert.ok(exactBoundaryPayload.data.some((reminder) => reminder.reminderId === noFileReminderId));
+
+    const outsideRangeResponse = await request(
+      "GET",
+      `?startAt=${encodeURIComponent(new Date(Date.parse(scheduledAt) + 2000).toISOString())}`
+    );
+    const outsideRangePayload = await outsideRangeResponse.json();
+    assert.equal(outsideRangeResponse.status, 200);
+    assert.ok(!outsideRangePayload.data.some((reminder) => reminder.reminderId === noFileReminderId));
+
+    const reversedRangeResponse = await request(
+      "GET",
+      `?startAt=${encodeURIComponent(endAt)}&endAt=${encodeURIComponent(startAt)}`
+    );
+    assert.equal(reversedRangeResponse.status, 400);
+
+    const malformedRangeResponse = await request("GET", "?startAt=not-a-date");
+    assert.equal(malformedRangeResponse.status, 400);
 
     const pastResponse = await request("POST", "", {
       body: reminderFields(new Date(Date.now() - 60 * 1000).toISOString()),
@@ -197,6 +238,9 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     assert.equal(response.status, 201);
     assert.equal(payload.data.attachment.fileType, "image");
     assert.equal(payload.data.attachment.mimeType, "image/png");
+    assert.equal(payload.data.title, "Reminder message");
+    assert.equal(payload.data.emoji, null);
+    assert.equal(payload.data.type, null);
     assert.match(payload.data.attachment.url, /^https:\/\/storage\.test\//);
     assert.deepEqual(storedFiles.get(payload.data.attachment.storagePath).buffer, imageBytes);
     assert.equal(getAt(`reminders/${payload.data.reminderId}`).attachment.storagePath, payload.data.attachment.storagePath);
@@ -260,6 +304,20 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     assert.equal(messagePayload.data.targetId, original.targetId);
     assert.equal(messagePayload.data.scheduledAt, original.scheduledAt);
     assert.equal(messagePayload.data.attachment.storagePath, original.attachment.storagePath);
+
+    const detailsResponse = await request("PUT", `/${reminderId}`, {
+      body: { title: "Updated title", emoji: "🎉", type: "celebration" },
+    });
+    const detailsPayload = await detailsResponse.json();
+    assert.equal(detailsResponse.status, 200);
+    assert.equal(detailsPayload.data.title, "Updated title");
+    assert.equal(detailsPayload.data.emoji, "🎉");
+    assert.equal(detailsPayload.data.type, "celebration");
+
+    const invalidEmojiResponse = await request("PUT", `/${reminderId}`, {
+      body: { emoji: "not an emoji" },
+    });
+    assert.equal(invalidEmojiResponse.status, 400);
 
     const futureDate = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     const futureResponse = await request("PUT", `/${reminderId}`, { body: { scheduledAt: futureDate } });
@@ -351,8 +409,12 @@ test("Reminder API handles multipart create/update, scheduling, and cancellation
     const response = await request("GET", "");
     const payload = await response.json();
     const listedIds = payload.data.map((reminder) => reminder.reminderId);
+    const legacyPending = payload.data.find((reminder) => reminder.reminderId === "list-pending-123");
 
     assert.ok(listedIds.includes("list-pending-123"));
+    assert.equal(legacyPending.title, reminderBase.message);
+    assert.equal(legacyPending.emoji, null);
+    assert.equal(legacyPending.type, null);
     assert.ok(!listedIds.includes("list-cancelled-123"));
     assert.ok(!listedIds.includes("list-sent-123"));
     assert.ok(!listedIds.includes("list-completed-123"));

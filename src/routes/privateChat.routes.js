@@ -9,6 +9,7 @@ const {
   setupPrivateChat: setupPrivateChatValidation,
   verifyPrivateChat: verifyPrivateChatValidation,
   changePrivatePassword: changePrivatePasswordValidation,
+  recoverPrivatePassword: recoverPrivatePasswordValidation,
   removePrivatePassword: removePrivatePasswordValidation,
 } = require("../validations/privateChat.validation");
 
@@ -52,6 +53,16 @@ router.patch(
   changePrivatePasswordValidation,
   handleValidationErrors,
   privateChatController.changePrivateChatPassword
+);
+
+router.post(
+  "/password/recover",
+  authMiddleware,
+  privateChatLimiter,
+  auditLog("recover_private_password"),
+  recoverPrivatePasswordValidation,
+  handleValidationErrors,
+  privateChatController.recoverPrivateChatPassword
 );
 
 // DELETE /api/privateChat/password — remove/disable private chat

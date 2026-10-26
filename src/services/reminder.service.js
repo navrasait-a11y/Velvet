@@ -85,11 +85,14 @@ const isDue = (reminder) => {
 
 exports.createReminder = async ({
   createdBy,
+  title,
   message,
   targetType,
   targetId,
   receiverId,
   scheduledAt,
+  emoji = null,
+  type = null,
   mentions = [],
   attachment = null,
 }) => {
@@ -102,7 +105,10 @@ exports.createReminder = async ({
   const reminder = {
     reminderId,
     createdBy,
+    title: typeof title === "string" ? title.trim() : message.trim(),
     message: message.trim(),
+    emoji,
+    type,
     mentions: normalizeMentions(mentions),
     targetType,
     targetId,
@@ -144,8 +150,15 @@ exports.updateReminder = async (reminderId, userId, changes) => {
 
   const update = {};
   update.reminderId = record.key;
-  for (const field of ["message", "targetType", "targetId", "receiverId"]) {
-    if (has(field)) update[field] = field === "message" ? changes[field].trim() : changes[field];
+  update.title = existing.title ?? existing.message;
+  update.emoji = existing.emoji ?? null;
+  update.type = existing.type ?? null;
+  for (const field of ["title", "message", "targetType", "targetId", "receiverId", "emoji", "type"]) {
+    if (has(field)) {
+      update[field] = ["title", "message"].includes(field)
+        ? changes[field].trim()
+        : changes[field];
+    }
   }
   if (targetType !== existing.targetType && targetType === "group" && !has("receiverId")) {
     update.receiverId = "";
@@ -193,18 +206,28 @@ exports.updateReminder = async (reminderId, userId, changes) => {
   return result.snapshot.val();
 };
 
-exports.getReminders = async (userId) => {
+exports.getReminders = async (userId, { startAt, endAt } = {}) => {
   const snapshot = await rtdb.ref("reminders").once("value");
   if (!snapshot.exists()) return [];
 
+  const startTimestamp = startAt === undefined ? null : Date.parse(startAt);
+  const endTimestamp = endAt === undefined ? null : Date.parse(endAt);
   const reminders = [];
   snapshot.forEach((child) => {
     const r = child.val();
     if (
       r.createdBy === userId &&
-      !HIDDEN_REMINDER_STATUSES.has(r.status)
+      !HIDDEN_REMINDER_STATUSES.has(r.status) &&
+      (startTimestamp === null || r.scheduledAt >= startTimestamp) &&
+      (endTimestamp === null || r.scheduledAt <= endTimestamp)
     ) {
-      reminders.push({ ...r, reminderId: child.key });
+      reminders.push({
+        ...r,
+        title: r.title ?? r.message,
+        emoji: r.emoji ?? null,
+        type: r.type ?? null,
+        reminderId: child.key,
+      });
     }
   });
 
@@ -216,7 +239,13 @@ exports.getReminder = async (reminderId, userId) => {
   const record = await findReminderById(reminderId);
   if (!record) throw new Error("Reminder not found");
 
-  const reminder = { ...record.reminder, reminderId: record.key };
+  const reminder = {
+    ...record.reminder,
+    title: record.reminder.title ?? record.reminder.message,
+    emoji: record.reminder.emoji ?? null,
+    type: record.reminder.type ?? null,
+    reminderId: record.key,
+  };
   if (reminder.createdBy !== userId) {
     throw new Error("Only the creator can view this reminder");
   }

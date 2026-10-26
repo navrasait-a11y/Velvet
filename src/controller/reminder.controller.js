@@ -40,17 +40,20 @@ exports.createReminder = async (req, res) => {
   let attachment = null;
   try {
     const userId = req.user.userId;
-    const { message, targetType, targetId, receiverId, scheduledAt, mentions } = req.body;
+    const { title, message, targetType, targetId, receiverId, scheduledAt, emoji, type, mentions } = req.body;
     const parsedMentions = getMentions(mentions);
     if (req.file) attachment = await uploadFile(req.file, "reminders");
 
     const reminder = await reminderService.createReminder({
       createdBy: userId,
+      title,
       message,
       targetType,
       targetId,
       receiverId,
       scheduledAt,
+      emoji,
+      type,
       mentions: parsedMentions,
       attachment,
     });
@@ -90,7 +93,11 @@ exports.updateReminder = async (req, res) => {
 exports.getReminders = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const reminders = await reminderService.getReminders(userId);
+    const { startAt, endAt } = req.query;
+    if (startAt && endAt && Date.parse(startAt) > Date.parse(endAt)) {
+      return res.status(400).json({ success: false, message: "startAt must be before or equal to endAt" });
+    }
+    const reminders = await reminderService.getReminders(userId, { startAt, endAt });
     return res.status(200).json({ success: true, count: reminders.length, data: reminders });
   } catch (error) {
     logger.error("Get Reminders Error:", error);

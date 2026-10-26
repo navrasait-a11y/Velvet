@@ -80,6 +80,32 @@ exports.changePrivateChatPassword = async (req, res) => {
   }
 };
 
+exports.recoverPrivateChatPassword = async (req, res) => {
+  try {
+    const { sessionId, otp, newPassword } = req.body;
+    if (!validatePassword(newPassword, res)) return;
+
+    await privateChatService.recoverPrivateChatPassword(
+      req.user.userId,
+      sessionId,
+      otp,
+      newPassword
+    );
+    return res.status(200).json({ success: true, message: "Password reset successfully" });
+  } catch (error) {
+    if (error.message === "Private chat is not enabled") {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+    if (
+      error.message === "Account verification failed" ||
+      (typeof error.message === "string" && error.message.startsWith("OTP "))
+    ) {
+      return res.status(401).json({ success: false, message: "OTP verification failed or expired" });
+    }
+    return res.status(500).json({ success: false, message: "Failed to reset password" });
+  }
+};
+
 // Remove Password
 exports.removePrivateChatPassword = async (req, res) => {
   try {

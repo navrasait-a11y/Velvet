@@ -5,6 +5,8 @@ const {
   syncSavedPhoneIndex,
 } = require("../services/contact.service");
 const { logger } = require("../utils/logger");
+const { ABOUT_VISIBILITIES } = require("../validations/user.validation");
+const { isEmojiOnlyAbout, parseAboutExpiry, isAboutStatusActive } = require("../utils/aboutStatus");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -23,6 +25,107 @@ const normalizePhoneNumber = (phone) => {
   if (phone.length === 10) phone = "91" + phone;
   if (phone.length === 12 && phone.startsWith("91")) return phone;
   return ""; // Invalid — discard
+};
+
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+const getAboutUpdates = async (db, userId, body, isCreate = false) => {
+  const updates = {};
+
+  if (hasOwn(body, "aboutStatus")) {
+    if (typeof body.aboutStatus !== "string" || !isEmojiOnlyAbout(body.aboutStatus)) {
+      const error = new Error("aboutStatus must contain only emoji");
+      error.status = 400;
+      throw error;
+    }
+    updates.aboutStatus = body.aboutStatus.trim();
+  } else if (isCreate) {
+    updates.aboutStatus = "";
+  }
+
+  if (hasOwn(body, "aboutVisibility")) {
+    if (!ABOUT_VISIBILITIES.includes(body.aboutVisibility)) {
+      const error = new Error("Invalid aboutVisibility");
+      error.status = 400;
+      throw error;
+    }
+    updates.aboutVisibility = body.aboutVisibility;
+  } else if (isCreate) {
+    updates.aboutVisibility = "everyone";
+  }
+
+  if (hasOwn(body, "aboutExcludedContacts")) {
+    let requestedContacts = body.aboutExcludedContacts;
+    if (typeof requestedContacts === "string") {
+      try {
+        requestedContacts = JSON.parse(requestedContacts);
+      } catch {
+        requestedContacts = null;
+      }
+    }
+    if (
+      !Array.isArray(requestedContacts) ||
+      requestedContacts.length > 100
+    ) {
+      const error = new Error("aboutExcludedContacts must be an array of up to 100 user IDs");
+      error.status = 400;
+      throw error;
+    }
+    const excludedContacts = [...new Set(requestedContacts)];
+    if (excludedContacts.some((id) => typeof id !== "string" || !id || id.length > 100)) {
+      const error = new Error("Each excluded contact must be a valid user ID");
+      error.status = 400;
+      throw error;
+    }
+
+    if (excludedContacts.length > 0) {
+      const contactRefs = excludedContacts.map((contactId) =>
+        db.collection("User_Contacts").doc(userId).collection("contacts").doc(contactId)
+      );
+      const contactDocs = await db.getAll(...contactRefs);
+      if (contactDocs.some((doc) => !doc.exists)) {
+        const error = new Error("Excluded users must be in your contacts");
+        error.status = 400;
+        throw error;
+      }
+    }
+    updates.aboutExcludedContacts = excludedContacts;
+  } else if (isCreate) {
+    updates.aboutExcludedContacts = [];
+  }
+
+  if (hasOwn(body, "aboutExpiresAt")) {
+    try {
+      updates.aboutExpiresAt = parseAboutExpiry(body.aboutExpiresAt);
+    } catch (error) {
+      error.status = 400;
+      throw error;
+    }
+  } else if (isCreate) {
+    updates.aboutExpiresAt = null;
+  }
+
+  return updates;
+};
+
+const canViewAboutStatus = async (db, profileUserId, viewerId, profile) => {
+  if (viewerId === profileUserId) return true;
+  if (!isAboutStatusActive(profile)) return false;
+
+  const visibility = profile.aboutVisibility || "everyone";
+  if (visibility === "nobody") return false;
+  if (visibility === "everyone") return true;
+  if (!["contacts", "contacts_except"].includes(visibility)) return false;
+
+  const contactDoc = await db
+    .collection("User_Contacts")
+    .doc(profileUserId)
+    .collection("contacts")
+    .doc(viewerId)
+    .get();
+  if (!contactDoc.exists) return false;
+  if (visibility === "contacts") return true;
+  return !(profile.aboutExcludedContacts || []).includes(viewerId);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +151,7 @@ exports.createProfile = async (req, res) => {
       return res.status(400).json({ success: false, message: "Profile already exists" });
     }
 
+    const aboutUpdates = await getAboutUpdates(db, userId, req.body, true);
     let profileImage = null;
     if (req.files?.profileImage?.[0]) {
       profileImage = await uploadPublicImage(req.files.profileImage[0], "profiles");
@@ -67,6 +171,7 @@ exports.createProfile = async (req, res) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    Object.assign(profileData, aboutUpdates);
 
     await userRef.set(profileData);
 
@@ -77,7 +182,10 @@ exports.createProfile = async (req, res) => {
     });
   } catch (err) {
     logger.error("CREATE PROFILE ERROR:", err);
-    return res.status(500).json({ success: false, message: "Failed to create profile" });
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.status ? err.message : "Failed to create profile",
+    });
   }
 };
 
@@ -113,6 +221,8 @@ exports.updateProfile = async (req, res) => {
       updatedData.bio = bio.trim();
     }
 
+    Object.assign(updatedData, await getAboutUpdates(db, userId, req.body));
+
     if (req.files?.profileImage?.[0]) {
       updatedData.profileImage = await uploadPublicImage(req.files.profileImage[0], "profiles");
     }
@@ -129,7 +239,10 @@ exports.updateProfile = async (req, res) => {
     });
   } catch (err) {
     logger.error("UPDATE PROFILE ERROR:", err);
-    return res.status(500).json({ success: false, message: "Failed to update profile" });
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.status ? err.message : "Failed to update profile",
+    });
   }
 };
 
@@ -161,6 +274,10 @@ exports.getProfile = async (req, res) => {
         profileImage: profileData.profileImage || null,
         bannerImage: profileData.bannerImage || null,
         bio: profileData.bio || "",
+        aboutStatus: isAboutStatusActive(profileData) ? profileData.aboutStatus : "",
+        aboutVisibility: profileData.aboutVisibility || "everyone",
+        aboutExcludedContacts: profileData.aboutExcludedContacts || [],
+        aboutExpiresAt: profileData.aboutExpiresAt ?? null,
         phone: userData.phone || null,
         createdAt: profileData.createdAt || null,
         updatedAt: profileData.updatedAt || null,
@@ -169,6 +286,49 @@ exports.getProfile = async (req, res) => {
   } catch (err) {
     logger.error("GET PROFILE ERROR:", err);
     return res.status(500).json({ success: false, message: "Failed to get profile" });
+  }
+};
+
+exports.getNotificationPreferences = async (req, res) => {
+  try {
+    const userDoc = await getDb().collection("users").doc(req.user.userId).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        pushNotificationsEnabled: userDoc.data().pushNotificationsEnabled !== false,
+      },
+    });
+  } catch (err) {
+    logger.error("GET NOTIFICATION PREFERENCES ERROR:", err);
+    return res.status(500).json({ success: false, message: "Failed to get notification preferences" });
+  }
+};
+
+exports.updateNotificationPreferences = async (req, res) => {
+  try {
+    const userRef = getDb().collection("users").doc(req.user.userId);
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const { pushNotificationsEnabled } = req.body;
+    await userRef.update({
+      pushNotificationsEnabled,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: { pushNotificationsEnabled },
+    });
+  } catch (err) {
+    logger.error("UPDATE NOTIFICATION PREFERENCES ERROR:", err);
+    return res.status(500).json({ success: false, message: "Failed to update notification preferences" });
   }
 };
 
@@ -187,6 +347,7 @@ exports.getUserProfile = async (req, res) => {
     }
 
     const profileData = profileDoc.data();
+    const mayViewAbout = await canViewAboutStatus(db, userId, req.user.userId, profileData);
 
     return res.status(200).json({
       success: true,
@@ -195,6 +356,11 @@ exports.getUserProfile = async (req, res) => {
         name: profileData.name || "",
         profileImage: profileData.profileImage || null,
         bio: profileData.bio || "",
+        ...(mayViewAbout
+          ? {
+              aboutStatus: isAboutStatusActive(profileData) ? profileData.aboutStatus : "",
+            }
+          : {}),
       },
     });
   } catch (err) {

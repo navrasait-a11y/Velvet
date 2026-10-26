@@ -1,4 +1,5 @@
-const { body, param } = require("express-validator");
+const { body, param, query } = require("express-validator");
+const { isEmojiOnlyAbout } = require("../utils/aboutStatus");
 
 const validateReminderId = param("id")
   .isString()
@@ -33,7 +34,22 @@ const validateMentions = () =>
     })
     .withMessage("mentions must be an array");
 
+const validateRangeDate = (field) =>
+  query(field)
+    .optional()
+    .isString()
+    .isISO8601({ strict: true, strictSeparator: true })
+    .bail()
+    .custom((value) => /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value))
+    .withMessage(`${field} must be a timezone-qualified ISO 8601 datetime`);
+
 const createReminder = [
+  body("title")
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage("Title must be at most 200 characters"),
   body("message")
     .isString()
     .trim()
@@ -59,11 +75,29 @@ const createReminder = [
     )
     .withMessage("receiverId is required for private_chat"),
   validateScheduledAt("scheduledAt", true),
+  body("emoji")
+    .optional()
+    .isString()
+    .isLength({ max: 32 })
+    .bail()
+    .custom((value) => value === "" || isEmojiOnlyAbout(value))
+    .withMessage("emoji must be a string of at most 32 characters"),
+  body("type")
+    .optional()
+    .isString()
+    .isLength({ min: 1, max: 40 })
+    .withMessage("type must be 1-40 characters"),
   validateMentions(),
 ];
 
 const updateReminder = [
   validateReminderId,
+  body("title")
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage("Title must be at most 200 characters"),
   body("message")
     .optional()
     .isString()
@@ -86,10 +120,22 @@ const updateReminder = [
     .isLength({ min: 5, max: 100 })
     .withMessage("Invalid receiverId"),
   validateScheduledAt("scheduledAt"),
+  body("emoji")
+    .optional()
+    .isString()
+    .isLength({ max: 32 })
+    .bail()
+    .custom((value) => value === "" || isEmojiOnlyAbout(value))
+    .withMessage("emoji must be a string of at most 32 characters"),
+  body("type")
+    .optional()
+    .isString()
+    .isLength({ min: 1, max: 40 })
+    .withMessage("type must be 1-40 characters"),
   validateMentions(),
 ];
 
-const getReminders = [];
+const getReminders = [validateRangeDate("startAt"), validateRangeDate("endAt")];
 
 const getReminder = [validateReminderId];
 

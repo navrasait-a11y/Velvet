@@ -1,5 +1,6 @@
 const bcrypt = require("bcrypt");
 const { getDb } = require("../config/firebase");
+const { verifyOtp } = require("./otp.service");
 
 // bcrypt cost factor — 12 is the production-safe minimum (2^12 = 4096 rounds)
 // 10 is too fast on modern hardware making brute-force cheaper
@@ -68,6 +69,32 @@ exports.changePrivateChatPassword = async (userId, oldPassword, newPassword) => 
   const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
   await ref.update({
+    password: hash,
+    updatedAt: Date.now(),
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recover Password — verify ownership through the existing phone OTP flow
+// ─────────────────────────────────────────────────────────────────────────────
+exports.recoverPrivateChatPassword = async (userId, sessionId, otp, newPassword) => {
+  const db = getDb();
+  const userDoc = await db.collection("users").doc(userId).get();
+  const phone = userDoc.exists ? userDoc.data().phone : null;
+  if (!phone) {
+    throw new Error("Account verification failed");
+  }
+
+  const settingsRef = db.collection("Users_Private_Settings").doc(userId);
+  const settingsDoc = await settingsRef.get();
+  if (!settingsDoc.exists) {
+    throw new Error("Private chat is not enabled");
+  }
+
+  await verifyOtp(sessionId, otp, phone);
+
+  const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await settingsRef.update({
     password: hash,
     updatedAt: Date.now(),
   });
